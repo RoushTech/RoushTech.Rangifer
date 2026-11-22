@@ -60,6 +60,19 @@ public class TargetModelEquivalenceTests
             Throws.InvalidOperationException.With.Message.Contains("2_Child"));
     }
 
+    [Test]
+    public void ModelDelta_RejectsLineEditAgainstParentWithOtherLineCount()
+    {
+        var parent = new ModelDelta("1_Parent");
+        parent.SetEntity("1:Blog", null, static b => b.Property<int>("Id"), static b => b.HasKey("Id"));
+        var child = new ModelDelta("2_Child", "1_Parent", parent);
+        child.Edit("1:Blog", 3, "00000000").Remove(0);
+
+        Assert.That(
+            () => child.Apply(new Microsoft.EntityFrameworkCore.ModelBuilder()),
+            Throws.InvalidOperationException.With.Message.Contains("edited by hand"));
+    }
+
     private static string DebugView(Assembly assembly, string @namespace, int version)
     {
         var type = assembly.GetType($"{@namespace}.{GeneratedDesigners.MigrationName(version)}")

@@ -34,7 +34,7 @@ internal sealed record DesignerDocument
 
     public IReadOnlyList<ModelBlock> Blocks { get; init; } = [];
 
-    public IReadOnlyList<BlockOperation<string>> Operations { get; init; } = [];
+    public IReadOnlyList<TextOperation> Operations { get; init; } = [];
 
     public TextSpan? ModelMembersSpan { get; init; }
 

@@ -50,6 +50,40 @@ public class RangiferMigrationsScaffolderTests
         });
     }
 
+    [Test]
+    public void Save_ParentsMigrationsFromParallelBranchesOnTheirCommonAncestor()
+    {
+        using var project = new TemporaryProject();
+        project.WriteDesigner(1, GeneratedDesigners.Full(1));
+        ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+
+        using var otherBranch = new TemporaryProject();
+        otherBranch.WriteDesigner(1, File.ReadAllText(project.DesignerPath(1)));
+        Save(otherBranch, version: 3, previousVersion: 1);
+
+        Save(project, version: 2, previousVersion: 1);
+        project.WriteDesigner(3, File.ReadAllText(otherBranch.DesignerPath(3)));
+        Save(project, version: 4, previousVersion: 3);
+
+        var designers = DesignerSet.Scan(project.Directory);
+        var parents = new Dictionary<int, int> { [2] = 1, [3] = 1, [4] = 3 };
+        var reconvert = ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+
+        Assert.Multiple(() =>
+        {
+            foreach (var (version, parentVersion) in parents)
+            {
+                var designer = designers.Find(GeneratedDesigners.MigrationId(version))
+                    ?? throw new AssertionException($"Version {version} has no designer.");
+                Assert.That(designer.ParentMigrationId, Is.EqualTo(GeneratedDesigners.MigrationId(parentVersion)), $"version {version}");
+                Assert.That(designers.ResolveBlocks(designer), Is.EqualTo(DesignerParser.Parse(GeneratedDesigners.Full(version), null).Blocks), $"version {version}");
+            }
+
+            Assert.That(reconvert.Converted, Is.Zero);
+            Assert.That(reconvert.AlreadyThin, Is.EqualTo(4));
+        });
+    }
+
     private static DesignerDocument? Save(TemporaryProject project, int version, int previousVersion)
     {
         using var context = new VersionedContext(version);

@@ -1,6 +1,7 @@
 namespace RoushTech.Rangifer.EntityFrameworkCore;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 /// <summary>
 /// The model-building blocks a migration changed relative to its parent migration. Thin migration
@@ -10,13 +11,13 @@ using Microsoft.EntityFrameworkCore;
 public sealed class ModelDelta
 {
     private readonly ModelDelta? parent;
-    private readonly List<BlockOperation<Action<ModelBuilder>>> operations = [];
-    private readonly Lazy<IReadOnlyList<KeyValuePair<string, Action<ModelBuilder>>>> blocks;
+    private readonly List<BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>>> operations = [];
+    private readonly Lazy<IReadOnlyList<KeyValuePair<string, Block<Action<ModelBuilder>, Action<EntityTypeBuilder>>>>> blocks;
 
     public ModelDelta(string migrationId)
     {
         MigrationId = migrationId;
-        blocks = new Lazy<IReadOnlyList<KeyValuePair<string, Action<ModelBuilder>>>>(Resolve);
+        blocks = new(Resolve);
     }
 
     public ModelDelta(string migrationId, string parentMigrationId, ModelDelta parent)
@@ -34,35 +35,65 @@ public sealed class ModelDelta
     public string MigrationId { get; }
 
     public void Set(string key, string? after, Action<ModelBuilder> build) =>
-        Add(BlockOperation<Action<ModelBuilder>>.Set(key, after, build));
+        Add(BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>>.Set(key, after, new OpaqueBlock<Action<ModelBuilder>, Action<EntityTypeBuilder>>(build)));
 
-    public void Move(string key, string? after) => Add(BlockOperation<Action<ModelBuilder>>.Move(key, after));
+    public void SetEntity(string key, string? after, params Action<EntityTypeBuilder>[] members) =>
+        Add(BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>>.Set(
+            key,
+            after,
+            new EntityBlock<Action<ModelBuilder>, Action<EntityTypeBuilder>>(EntityKey.EntityName(key), members)));
 
-    public void Remove(string key) => Add(BlockOperation<Action<ModelBuilder>>.Remove(key));
+    public EntityEdit Edit(string key, int parentLineCount, string parentHash)
+    {
+        var edit = new EntityEdit(this);
+        Add(BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>>.EditMembers(
+            key,
+            new MemberEdit<Action<EntityTypeBuilder>>(parentLineCount, parentHash, edit.Operations)));
+        return edit;
+    }
+
+    public void Move(string key, string? after) => Add(BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>>.Move(key, after));
+
+    public void Remove(string key) => Add(BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>>.Remove(key));
 
     public void Apply(ModelBuilder modelBuilder)
     {
-        foreach (var (_, build) in blocks.Value)
+        foreach (var (_, block) in blocks.Value)
         {
-            build(modelBuilder);
+            switch (block)
+            {
+                case OpaqueBlock<Action<ModelBuilder>, Action<EntityTypeBuilder>> opaque:
+                    opaque.Value(modelBuilder);
+                    break;
+                case EntityBlock<Action<ModelBuilder>, Action<EntityTypeBuilder>> entity:
+                    var entityTypeBuilder = modelBuilder.Entity(entity.EntityName);
+                    foreach (var member in entity.Members)
+                    {
+                        member(entityTypeBuilder);
+                    }
+
+                    break;
+            }
         }
     }
 
-    private void Add(BlockOperation<Action<ModelBuilder>> operation)
+    internal void EnsureUnresolved()
     {
         if (blocks.IsValueCreated)
         {
             throw new InvalidOperationException($"The model delta for migration '{MigrationId}' has already been resolved.");
         }
+    }
 
+    private void Add(BlockOperation<Action<ModelBuilder>, Action<EntityTypeBuilder>> operation)
+    {
+        EnsureUnresolved();
         operations.Add(operation);
     }
 
-    private IReadOnlyList<KeyValuePair<string, Action<ModelBuilder>>> Resolve()
+    private IReadOnlyList<KeyValuePair<string, Block<Action<ModelBuilder>, Action<EntityTypeBuilder>>>> Resolve()
     {
-        var sequence = parent is null
-            ? new BlockSequence<Action<ModelBuilder>>()
-            : new BlockSequence<Action<ModelBuilder>>(parent.blocks.Value);
+        var sequence = new BlockSequence<Action<ModelBuilder>, Action<EntityTypeBuilder>>(parent?.blocks.Value ?? []);
 
         foreach (var operation in operations)
         {
@@ -80,4 +111,42 @@ public sealed class ModelDelta
 
         return sequence.Blocks;
     }
+}
+
+/// <summary>
+/// Line-level changes to one entity type's model block, by position in the parent migration's lines.
+/// </summary>
+public sealed class EntityEdit
+{
+    private readonly ModelDelta delta;
+
+    internal EntityEdit(ModelDelta delta)
+    {
+        this.delta = delta;
+    }
+
+    internal List<MemberOperation<Action<EntityTypeBuilder>>> Operations { get; } = [];
+
+    public EntityEdit Replace(int index, Action<EntityTypeBuilder> line) => Add(MemberOperationKind.Replace, index, line);
+
+    public EntityEdit Insert(int index, Action<EntityTypeBuilder> line) => Add(MemberOperationKind.Insert, index, line);
+
+    public EntityEdit Remove(int index) => Add(MemberOperationKind.Remove, index, null);
+
+    private EntityEdit Add(MemberOperationKind kind, int index, Action<EntityTypeBuilder>? line)
+    {
+        delta.EnsureUnresolved();
+        Operations.Add(new MemberOperation<Action<EntityTypeBuilder>>(kind, index, line));
+        return this;
+    }
+}
+
+internal static class EntityKey
+{
+    // Entity blocks are keyed "<pass>:<entity name>"; names can contain '#' (owned types), so no suffix is allowed.
+    public static string EntityName(string key) =>
+        TryEntityName(key) ?? throw new InvalidOperationException($"Model block '{key}' is not an entity type block.");
+
+    public static string? TryEntityName(string key) =>
+        key.Length > 2 && key[1] == ':' && key[0] is >= '1' and <= '9' ? key[2..] : null;
 }

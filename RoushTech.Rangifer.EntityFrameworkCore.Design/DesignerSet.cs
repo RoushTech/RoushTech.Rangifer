@@ -2,23 +2,25 @@ namespace RoushTech.Rangifer.EntityFrameworkCore.Design;
 
 using System.Text;
 using System.Text.RegularExpressions;
+using RoushTech.Rangifer.EntityFrameworkCore;
 
 internal sealed partial class DesignerSet
 {
     private const string DesignerSuffix = ".Designer.cs";
     private static readonly string[] IgnoredDirectories = ["bin", "obj", "node_modules", ".git"];
 
-    private readonly Dictionary<string, string> paths;
+    private readonly Dictionary<string, (string Path, string Text)> files;
     private readonly Dictionary<string, DesignerDocument?> documents = new(StringComparer.Ordinal);
 
-    private DesignerSet(Dictionary<string, string> paths)
+    private DesignerSet(Dictionary<string, (string Path, string Text)> files)
     {
-        this.paths = paths;
+        this.files = files;
     }
 
+    // EF identifies a migration by its [Migration] attribute, not its file name, and renamed files keep the old id.
     public static DesignerSet Scan(string projectDirectory)
     {
-        var paths = new Dictionary<string, string>(StringComparer.Ordinal);
+        var files = new Dictionary<string, (string Path, string Text)>(StringComparer.Ordinal);
         var root = Path.GetFullPath(projectDirectory);
         foreach (var path in Directory.EnumerateFiles(root, "*" + DesignerSuffix, SearchOption.AllDirectories))
         {
@@ -29,18 +31,24 @@ internal sealed partial class DesignerSet
                 continue;
             }
 
-            var migrationId = Path.GetFileName(path)[..^DesignerSuffix.Length];
-            if (MigrationIdPattern().IsMatch(migrationId) && !paths.TryAdd(migrationId, path))
+            var text = File.ReadAllText(path);
+            if (MigrationAttributePattern().Match(text) is not { Success: true } match)
             {
-                throw new InvalidOperationException($"Migration '{migrationId}' has more than one designer: '{paths[migrationId]}' and '{path}'.");
+                continue;
+            }
+
+            var migrationId = match.Groups["id"].Value;
+            if (!files.TryAdd(migrationId, (path, text)))
+            {
+                throw new InvalidOperationException($"Migration '{migrationId}' has more than one designer: '{files[migrationId].Path}' and '{path}'.");
             }
         }
 
-        return new DesignerSet(paths);
+        return new DesignerSet(files);
     }
 
     public IEnumerable<DesignerDocument> All() =>
-        paths.Keys.Order(StringComparer.Ordinal).Select(Find).OfType<DesignerDocument>();
+        files.Keys.Order(StringComparer.Ordinal).Select(Find).OfType<DesignerDocument>();
 
     public DesignerDocument? Find(string migrationId)
     {
@@ -50,12 +58,12 @@ internal sealed partial class DesignerSet
         }
 
         DesignerDocument? document = null;
-        if (paths.TryGetValue(migrationId, out var path))
+        if (files.TryGetValue(migrationId, out var file))
         {
-            document = DesignerParser.TryParse(File.ReadAllText(path), path);
+            document = DesignerParser.TryParse(file.Text, file.Path);
             if (document is not null && document.MigrationId != migrationId)
             {
-                throw new InvalidOperationException($"'{path}' declares migration '{document.MigrationId}', which does not match its file name.");
+                throw new InvalidOperationException($"'{file.Path}' declares migration '{document.MigrationId}', but was found as '{migrationId}'.");
             }
         }
 
@@ -65,11 +73,14 @@ internal sealed partial class DesignerSet
 
     public void Replace(DesignerDocument document) => documents[document.MigrationId] = document;
 
-    public IReadOnlyList<ModelBlock> ResolveBlocks(DesignerDocument designer)
+    public IReadOnlyList<ModelBlock> ResolveBlocks(DesignerDocument designer) =>
+        ResolveChain(designer).Select(block => new ModelBlock(block.Key, EntityLines.Text(block.Value))).ToList();
+
+    public IReadOnlyList<KeyValuePair<string, TextBlock>> ResolveChain(DesignerDocument designer)
     {
         if (designer.Kind == DesignerKind.Full)
         {
-            return designer.Blocks;
+            return Opaque(designer.Blocks);
         }
 
         var chain = new Stack<DesignerDocument>();
@@ -102,9 +113,23 @@ internal sealed partial class DesignerSet
                 ?? throw new InvalidOperationException($"Migration '{current.MigrationId}' builds on '{parentId}', whose designer was not found.");
         }
 
-        var blocks = current.Kind == DesignerKind.Full ? current.Blocks : [];
-        var operations = chain.SelectMany(link => link.Operations);
-        return DeltaPlanner.Replay(blocks, operations).Blocks.Select(block => new ModelBlock(block.Key, block.Value)).ToList();
+        var sequence = new BlockSequence<string, string>(current.Kind == DesignerKind.Full ? Opaque(current.Blocks) : [], EntityLines.Hash);
+        foreach (var link in chain)
+        {
+            foreach (var operation in link.Operations)
+            {
+                try
+                {
+                    sequence.Apply(operation);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    throw new InvalidOperationException($"Migration '{link.MigrationId}' does not apply on top of its parent: {exception.Message}", exception);
+                }
+            }
+        }
+
+        return sequence.Blocks;
     }
 
     public static void Write(DesignerDocument document)
@@ -117,6 +142,9 @@ internal sealed partial class DesignerSet
         File.WriteAllText(path, document.Text, new UTF8Encoding(HasUtf8Bom(path)));
     }
 
+    private static List<KeyValuePair<string, TextBlock>> Opaque(IEnumerable<ModelBlock> blocks) =>
+        blocks.Select(block => KeyValuePair.Create(block.Key, (TextBlock)new OpaqueBlock<string, string>(block.Text))).ToList();
+
     private static bool HasUtf8Bom(string path)
     {
         Span<byte> preamble = stackalloc byte[3];
@@ -124,6 +152,6 @@ internal sealed partial class DesignerSet
         return stream.Read(preamble) == 3 && preamble.SequenceEqual(Encoding.UTF8.Preamble);
     }
 
-    [GeneratedRegex(@"^\d{14}_")]
-    private static partial Regex MigrationIdPattern();
+    [GeneratedRegex(@"\[\s*(?:global::)?(?:Microsoft\.EntityFrameworkCore\.Migrations\.)?Migration(?:Attribute)?\s*\(\s*""(?<id>(?:[^""\\]|\\.)*)""\s*\)\s*\]")]
+    private static partial Regex MigrationAttributePattern();
 }

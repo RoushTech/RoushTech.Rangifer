@@ -9,7 +9,7 @@ internal static class ThinDesignerWriter
     private const string ModelDeltaType = "global::RoushTech.Rangifer.EntityFrameworkCore.ModelDelta";
     private const string Indent = "    ";
 
-    public static string Render(DesignerDocument designer, IReadOnlyList<BlockOperation<string>> operations, DesignerDocument? parent)
+    public static string Render(DesignerDocument designer, IReadOnlyList<TextOperation> operations, DesignerDocument? parent)
     {
         if (designer.ModelMembersSpan is not { } span)
         {
@@ -44,16 +44,43 @@ internal static class ThinDesignerWriter
                 case BlockOperationKind.Move:
                     writer.Line(body, $"delta.Move({Literal(operation.Key)}, {Literal(operation.After)});");
                     break;
-                case BlockOperationKind.Set:
+                case BlockOperationKind.Set when operation.Value is EntityBlock<string, string> entity:
+                    writer.Blank();
+                    writer.Line(body, $"delta.SetEntity({Literal(operation.Key)}, {Literal(operation.After)},");
+                    for (var index = 0; index < entity.Members.Count; index++)
+                    {
+                        WriteLine(writer, body + Indent, "static b => ", entity.Members[index], index == entity.Members.Count - 1 ? ");" : ",");
+                    }
+
+                    break;
+                case BlockOperationKind.Set when operation.Value is OpaqueBlock<string, string> opaque:
                     writer.Blank();
                     writer.Line(body, $"delta.Set({Literal(operation.Key)}, {Literal(operation.After)}, static modelBuilder =>");
                     writer.Line(body, "{");
-                    foreach (var line in (operation.Value ?? string.Empty).Split('\n'))
+                    foreach (var line in opaque.Value.Split('\n'))
                     {
                         writer.Line(line.Length == 0 ? string.Empty : body + Indent, line);
                     }
 
                     writer.Line(body, "});");
+                    break;
+                case BlockOperationKind.Edit when operation.Edit is { } edit:
+                    writer.Blank();
+                    writer.Line(body, $"delta.Edit({Literal(operation.Key)}, {edit.ParentCount}, {Literal(edit.ParentHash)})");
+                    for (var index = 0; index < edit.Operations.Count; index++)
+                    {
+                        var line = edit.Operations[index];
+                        var end = index == edit.Operations.Count - 1 ? ");" : ")";
+                        if (line.Value is { } value)
+                        {
+                            WriteLine(writer, body + Indent, $".{line.Kind}({line.Index}, static b => ", value, end);
+                        }
+                        else
+                        {
+                            writer.Line(body + Indent, $".{line.Kind}({line.Index}{end}");
+                        }
+                    }
+
                     break;
                 default:
                     throw new InvalidOperationException($"Unknown model block operation '{operation.Kind}'.");
@@ -66,6 +93,16 @@ internal static class ThinDesignerWriter
         writer.Line(member, "}");
         writer.Raw(designer.Text[span.End..]);
         return writer.ToString();
+    }
+
+    private static void WriteLine(Writer writer, string indent, string prefix, string statement, string end)
+    {
+        var lines = statement[..^1].Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var text = (index == 0 ? prefix : string.Empty) + lines[index] + (index == lines.Length - 1 ? end : string.Empty);
+            writer.Line(lines[index].Length == 0 && index > 0 ? string.Empty : indent, text);
+        }
     }
 
     private static string Literal(string? value) => value is null ? "null" : SymbolDisplay.FormatLiteral(value, quote: true);

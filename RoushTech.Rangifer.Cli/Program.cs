@@ -39,7 +39,7 @@ internal static class Program
             Console.WriteLine(
                 $"{(dryRun ? "Would convert" : "Converted")} {summary.Converted} designers "
                 + $"({summary.CharactersBefore:N0} to {summary.CharactersAfter:N0} characters). "
-                + $"{summary.AlreadyThin} already thin, {summary.WithoutModel} without a target model.");
+                + $"{summary.Updated} updated to the current format, {summary.AlreadyThin} already thin, {summary.WithoutModel} without a target model.");
             return 0;
         });
 

@@ -5,29 +5,55 @@ internal enum BlockOperationKind
     Set,
     Move,
     Remove,
+    Edit,
 }
 
-internal sealed record BlockOperation<T>(BlockOperationKind Kind, string Key, string? After, T? Value)
+internal enum MemberOperationKind
 {
-    public static BlockOperation<T> Set(string key, string? after, T value) => new(BlockOperationKind.Set, key, after, value);
+    Replace,
+    Insert,
+    Remove,
+}
 
-    public static BlockOperation<T> Move(string key, string? after) => new(BlockOperationKind.Move, key, after, default);
+internal abstract record Block<TOpaque, TMember>;
 
-    public static BlockOperation<T> Remove(string key) => new(BlockOperationKind.Remove, key, null, default);
+internal sealed record OpaqueBlock<TOpaque, TMember>(TOpaque Value) : Block<TOpaque, TMember>;
+
+internal sealed record EntityBlock<TOpaque, TMember>(string EntityName, IReadOnlyList<TMember> Members) : Block<TOpaque, TMember>;
+
+internal sealed record MemberOperation<TMember>(MemberOperationKind Kind, int Index, TMember? Value);
+
+internal sealed record MemberEdit<TMember>(int ParentCount, string ParentHash, IReadOnlyList<MemberOperation<TMember>> Operations);
+
+internal sealed record BlockOperation<TOpaque, TMember>(
+    BlockOperationKind Kind,
+    string Key,
+    string? After,
+    Block<TOpaque, TMember>? Value,
+    MemberEdit<TMember>? Edit)
+{
+    public static BlockOperation<TOpaque, TMember> Set(string key, string? after, Block<TOpaque, TMember> value) =>
+        new(BlockOperationKind.Set, key, after, value, null);
+
+    public static BlockOperation<TOpaque, TMember> Move(string key, string? after) => new(BlockOperationKind.Move, key, after, null, null);
+
+    public static BlockOperation<TOpaque, TMember> Remove(string key) => new(BlockOperationKind.Remove, key, null, null, null);
+
+    public static BlockOperation<TOpaque, TMember> EditMembers(string key, MemberEdit<TMember> edit) =>
+        new(BlockOperationKind.Edit, key, null, null, edit);
 }
 
 // Shared by the runtime and the design-time tooling so both replay a delta chain identically.
-internal sealed class BlockSequence<T>
+internal sealed class BlockSequence<TOpaque, TMember>
 {
     private readonly List<string> order = [];
-    private readonly Dictionary<string, T> values = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Block<TOpaque, TMember>> values = new(StringComparer.Ordinal);
+    private readonly Func<IReadOnlyList<TMember>, string>? memberHash;
 
-    public BlockSequence()
+    // The runtime only has compiled members, so only the design-time tooling can check parent hashes.
+    public BlockSequence(IEnumerable<KeyValuePair<string, Block<TOpaque, TMember>>> blocks, Func<IReadOnlyList<TMember>, string>? memberHash = null)
     {
-    }
-
-    public BlockSequence(IEnumerable<KeyValuePair<string, T>> blocks)
-    {
+        this.memberHash = memberHash;
         foreach (var (key, value) in blocks)
         {
             if (!values.TryAdd(key, value))
@@ -41,9 +67,10 @@ internal sealed class BlockSequence<T>
 
     public IReadOnlyList<string> Keys => order;
 
-    public IReadOnlyList<KeyValuePair<string, T>> Blocks => order.Select(key => KeyValuePair.Create(key, values[key])).ToList();
+    public IReadOnlyList<KeyValuePair<string, Block<TOpaque, TMember>>> Blocks =>
+        order.Select(key => KeyValuePair.Create(key, values[key])).ToList();
 
-    public void Apply(BlockOperation<T> operation)
+    public void Apply(BlockOperation<TOpaque, TMember> operation)
     {
         switch (operation.Kind)
         {
@@ -67,10 +94,65 @@ internal sealed class BlockSequence<T>
                 order.Remove(operation.Key);
                 values.Remove(operation.Key);
                 break;
+            case BlockOperationKind.Edit:
+                RequireExisting(operation.Key);
+                values[operation.Key] = EditMembers(operation.Key, values[operation.Key], operation.Edit
+                    ?? throw new InvalidOperationException($"Model block '{operation.Key}' is edited without member operations."));
+                break;
             default:
                 throw new InvalidOperationException($"Unknown model block operation '{operation.Kind}'.");
         }
     }
+
+    private EntityBlock<TOpaque, TMember> EditMembers(string key, Block<TOpaque, TMember> block, MemberEdit<TMember> edit)
+    {
+        if (block is not EntityBlock<TOpaque, TMember> entity)
+        {
+            throw new InvalidOperationException($"Model block '{key}' is edited by line, but its parent stores it whole.");
+        }
+
+        if (entity.Members.Count != edit.ParentCount)
+        {
+            throw new InvalidOperationException(
+                $"Model block '{key}' is edited by line against a parent with {edit.ParentCount} lines, but the parent has {entity.Members.Count}. An earlier designer was edited by hand.");
+        }
+
+        if (memberHash is not null && memberHash(entity.Members) != edit.ParentHash)
+        {
+            throw new InvalidOperationException(
+                $"Model block '{key}' is edited by line against a parent with hash {edit.ParentHash}, but the parent's lines hash to {memberHash(entity.Members)}. An earlier designer was edited by hand.");
+        }
+
+        var members = entity.Members.ToList();
+        foreach (var operation in edit.Operations)
+        {
+            var limit = operation.Kind == MemberOperationKind.Insert ? members.Count : members.Count - 1;
+            if (operation.Index < 0 || operation.Index > limit)
+            {
+                throw new InvalidOperationException($"Model block '{key}' has a line {operation.Kind} at {operation.Index}, outside its {members.Count} lines.");
+            }
+
+            switch (operation.Kind)
+            {
+                case MemberOperationKind.Replace:
+                    members[operation.Index] = RequireValue(key, operation);
+                    break;
+                case MemberOperationKind.Insert:
+                    members.Insert(operation.Index, RequireValue(key, operation));
+                    break;
+                case MemberOperationKind.Remove:
+                    members.RemoveAt(operation.Index);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown line operation '{operation.Kind}'.");
+            }
+        }
+
+        return entity with { Members = members };
+    }
+
+    private static TMember RequireValue(string key, MemberOperation<TMember> operation) =>
+        operation.Value ?? throw new InvalidOperationException($"Model block '{key}' has a line {operation.Kind} without a value.");
 
     private void RequireExisting(string key)
     {

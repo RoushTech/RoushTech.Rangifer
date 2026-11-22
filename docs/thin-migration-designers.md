@@ -6,7 +6,7 @@ The designers can't simply be deleted, they're a needed part of EFC. Each migrat
 
 EF already works out what changed since the previous migration, then saves the whole model anyway. Rangifer saves only what changed, and rebuilds the full model at runtime by replaying the chain, so EF gets the same model it would have read from the full designer.
 
-On one production project, conversion made the designers 14x smaller. Up and Down SQL for every migration came out byte-identical, `migrations remove` wrote an identical snapshot, and the migrations project rebuilt in 16 s instead of 36 s.
+On one production project, conversion made the designers 34x smaller. Up and Down SQL for every migration came out byte-identical, `migrations remove` wrote an identical snapshot, and the migrations project rebuilt in 19 s instead of 43 s.
 
 A thin designer looks like this:
 
@@ -25,16 +25,17 @@ partial class AddTags
     {
         var delta = new global::RoushTech.Rangifer.EntityFrameworkCore.ModelDelta("20260301120000_AddTags", "20260215090000_AddPosts", global::Blogging.Migrations.AddPosts.RangiferDelta);
 
-        delta.Set("1:Blogging.Tag", "1:Blogging.Post", static modelBuilder =>
-        {
-            modelBuilder.Entity("Blogging.Tag", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-                    // ...
-                });
-        });
+        delta.Edit("1:Blogging.Post", 5, "3b0c2633")
+            .Replace(3, static b => b.Property<string>("Title")
+                .HasMaxLength(200)
+                .HasColumnType("TEXT"));
+
+        delta.SetEntity("1:Blogging.Tag", "1:Blogging.Post",
+            static b => b.Property<int>("Id")
+                .ValueGeneratedOnAdd()
+                .HasColumnType("INTEGER"),
+            static b => b.HasKey("Id"),
+            static b => b.ToTable("Tags"));
 
         return delta;
     }

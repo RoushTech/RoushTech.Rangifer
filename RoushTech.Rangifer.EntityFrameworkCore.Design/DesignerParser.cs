@@ -89,7 +89,7 @@ internal static class DesignerParser
         }
 
         var parentMigrationId = arguments.Count == 3 ? ReadString(arguments[1], header.Path) : null;
-        var operations = new List<BlockOperation<string>>();
+        var operations = new List<TextOperation>();
         foreach (var statement in statements.Skip(1).Take(statements.Count - 2))
         {
             operations.Add(ReadOperation(statement, header.Path));
@@ -119,36 +119,119 @@ internal static class DesignerParser
         };
     }
 
-    private static BlockOperation<string> ReadOperation(StatementSyntax statement, string? path)
+    private static TextOperation ReadOperation(StatementSyntax statement, string? path)
     {
-        if (statement is not ExpressionStatementSyntax
+        var calls = new Stack<(string Name, SeparatedSyntaxList<ArgumentSyntax> Arguments)>();
+        var expression = (statement as ExpressionStatementSyntax)?.Expression;
+        while (expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax member } invocation)
+        {
+            calls.Push((member.Name.Identifier.ValueText, invocation.ArgumentList.Arguments));
+            if (member.Expression is IdentifierNameSyntax { Identifier.ValueText: DeltaVariableName })
             {
-                Expression: InvocationExpressionSyntax
-                {
-                    Expression: MemberAccessExpressionSyntax
-                    {
-                        Expression: IdentifierNameSyntax { Identifier.ValueText: DeltaVariableName },
-                        Name.Identifier.ValueText: var operation,
-                    },
-                    ArgumentList.Arguments: var arguments,
-                },
-            })
+                expression = null;
+                break;
+            }
+
+            expression = member.Expression;
+        }
+
+        if (expression is not null || calls.Count == 0)
         {
             throw Error(path, $"has an unrecognized statement in {DeltaFactoryName}: {statement}");
         }
 
+        var (operation, arguments) = calls.Pop();
+        if (operation == "Edit" && arguments.Count == 3)
+        {
+            var lines = calls.Select(call => ReadLineOperation(call.Name, call.Arguments, statement, path)).ToList();
+            return TextOperation.EditMembers(
+                RequireString(arguments[0], path),
+                new MemberEdit<string>(ReadInt(arguments[1], path), RequireString(arguments[2], path), lines));
+        }
+
+        if (calls.Count > 0)
+        {
+            throw Error(path, $"has an unrecognized model delta call: {statement}");
+        }
+
         return (operation, arguments.Count) switch
         {
-            ("Remove", 1) => BlockOperation<string>.Remove(RequireString(arguments[0], path)),
-            ("Move", 2) => BlockOperation<string>.Move(RequireString(arguments[0], path), ReadString(arguments[1], path)),
+            ("Remove", 1) => TextOperation.Remove(RequireString(arguments[0], path)),
+            ("Move", 2) => TextOperation.Move(RequireString(arguments[0], path), ReadString(arguments[1], path)),
             ("Set", 3) when arguments[2].Expression is LambdaExpressionSyntax { Body: BlockSyntax body } =>
-                BlockOperation<string>.Set(
+                TextOperation.Set(
                     RequireString(arguments[0], path),
                     ReadString(arguments[1], path),
-                    Normalize(body.Statements, path)),
+                    new OpaqueBlock<string, string>(Normalize(body.Statements, path))),
+            ("SetEntity", > 2) => ReadSetEntity(arguments, path),
             _ => throw Error(path, $"has an unrecognized model delta call: {statement}"),
         };
     }
+
+    private static TextOperation ReadSetEntity(SeparatedSyntaxList<ArgumentSyntax> arguments, string? path)
+    {
+        var key = RequireString(arguments[0], path);
+        var name = EntityKey.TryEntityName(key) ?? throw Error(path, $"sets '{key}' by line, but it is not an entity type block.");
+        return TextOperation.Set(
+            key,
+            ReadString(arguments[1], path),
+            new EntityBlock<string, string>(name, arguments.Skip(2).Select(argument => ReadLine(argument, path)).ToList()));
+    }
+
+    private static MemberOperation<string> ReadLineOperation(string name, SeparatedSyntaxList<ArgumentSyntax> arguments, StatementSyntax statement, string? path) =>
+        (name, arguments.Count) switch
+        {
+            ("Replace", 2) => new(MemberOperationKind.Replace, ReadInt(arguments[0], path), ReadLine(arguments[1], path)),
+            ("Insert", 2) => new(MemberOperationKind.Insert, ReadInt(arguments[0], path), ReadLine(arguments[1], path)),
+            ("Remove", 1) => new(MemberOperationKind.Remove, ReadInt(arguments[0], path), null),
+            _ => throw Error(path, $"has an unrecognized line edit '{name}' in: {statement}"),
+        };
+
+    // A line is written as "static b => <EF statement>", with continuation lines indented from the start of the
+    // line the lambda begins on, so it reads back as the statement EF generated.
+    private static string ReadLine(ArgumentSyntax argument, string? path)
+    {
+        if (argument.Expression is not SimpleLambdaExpressionSyntax
+            {
+                Parameter.Identifier.ValueText: EntityLines.BuilderName,
+                ExpressionBody: { } body,
+            } lambda)
+        {
+            throw Error(path, $"expected a 'static {EntityLines.BuilderName} => ...' line but found '{argument}'.");
+        }
+
+        if (body.DescendantTokens().Any(token => token.Text.Contains('\n', StringComparison.Ordinal)))
+        {
+            throw Error(path, $"contains a multi-line literal near line {Line(body)}, which cannot be re-indented safely.");
+        }
+
+        var startLine = lambda.SyntaxTree.GetText().Lines[lambda.GetLocation().GetLineSpan().StartLinePosition.Line].ToString();
+        var column = startLine.Length - startLine.TrimStart().Length;
+        var lines = body.ToString().ReplaceLineEndings("\n").Split('\n');
+        var builder = new StringBuilder(lines[0]);
+        foreach (var line in lines.Skip(1))
+        {
+            builder.Append('\n');
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            if (line.Length < column || !line.AsSpan(0, column).IsWhiteSpace())
+            {
+                throw Error(path, $"has a line indented less than its model delta call near line {Line(body)}.");
+            }
+
+            builder.Append(line, column, line.Length - column);
+        }
+
+        return builder.Append(';').ToString();
+    }
+
+    private static int ReadInt(ArgumentSyntax argument, string? path) =>
+        argument.Expression is LiteralExpressionSyntax literal && literal.IsKind(SyntaxKind.NumericLiteralExpression) && literal.Token.Value is int value
+            ? value
+            : throw Error(path, $"expected an integer literal but found '{argument}'.");
 
     private static List<ModelBlock> ReadBlocks(SyntaxList<StatementSyntax> statements, string? path)
     {
@@ -210,7 +293,7 @@ internal static class DesignerParser
         }
     }
 
-    private static (string Name, LambdaExpressionSyntax Configuration)? ReadEntityStatement(StatementSyntax statement) =>
+    public static (string Name, LambdaExpressionSyntax Configuration)? ReadEntityStatement(StatementSyntax statement) =>
         statement is ExpressionStatementSyntax
         {
             Expression: InvocationExpressionSyntax
@@ -266,7 +349,7 @@ internal static class DesignerParser
 
     // Blocks are stored without their surrounding indentation so a block keeps the same text whether it
     // sits in EF's BuildTargetModel or inside a model delta lambda.
-    private static string Normalize(StatementSyntax statement, string? path)
+    public static string Normalize(StatementSyntax statement, string? path)
     {
         if (statement.DescendantTokens().Any(token => token.Text.Contains('\n', StringComparison.Ordinal)))
         {

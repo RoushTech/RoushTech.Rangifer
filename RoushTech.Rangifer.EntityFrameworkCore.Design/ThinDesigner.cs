@@ -2,11 +2,16 @@ namespace RoushTech.Rangifer.EntityFrameworkCore.Design;
 
 internal static class ThinDesigner
 {
-    public static DesignerDocument Create(DesignerSet designers, DesignerDocument designer, DesignerDocument? parent)
+    public static DesignerDocument Create(
+        DesignerSet designers,
+        DesignerDocument designer,
+        DesignerDocument? parent,
+        IReadOnlyList<ModelBlock>? blocks = null,
+        bool lineEdits = true)
     {
-        var blocks = designers.ResolveBlocks(designer);
-        var parentBlocks = parent is null ? null : designers.ResolveBlocks(parent);
-        var operations = DeltaPlanner.Plan(parentBlocks, blocks);
+        blocks ??= designers.ResolveBlocks(designer);
+        var parentBlocks = parent is null ? null : designers.ResolveChain(parent);
+        var operations = DeltaPlanner.Plan(parentBlocks, blocks, lineEdits);
         var thin = DesignerParser.Parse(ThinDesignerWriter.Render(designer, operations, parent), designer.Path);
 
         if (thin.Kind != DesignerKind.Thin
@@ -15,9 +20,7 @@ internal static class ThinDesigner
             || thin.ClassName != designer.ClassName
             || thin.ContextType != designer.ContextType
             || thin.ParentMigrationId != parent?.MigrationId
-            || !DeltaPlanner.Matches(
-                designers.ResolveBlocks(thin).Select(block => KeyValuePair.Create(block.Key, block.Text)).ToList(),
-                blocks))
+            || !DeltaPlanner.Matches(designers.ResolveChain(thin), blocks))
         {
             throw new InvalidOperationException(
                 $"Rangifer's thin designer for '{designer.MigrationId}' does not rebuild the same model as the original, so it was not written.");
