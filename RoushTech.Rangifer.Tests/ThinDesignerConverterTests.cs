@@ -138,6 +138,79 @@ public class ThinDesignerConverterTests
     {
         using var project = WriteAllVersions();
         ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+        var (editor, _) = EditLineInEarlierDesigner(project, line => $"{line}.HasComment(\"edited\")");
+
+        var edited = DesignerSet.Scan(project.Directory);
+
+        Assert.That(
+            () => edited.ResolveBlocks(edited.Find(editor.MigrationId)!),
+            Throws.InvalidOperationException.With.Message.Contains(editor.MigrationId).And.Message.Contains("edited by hand"));
+    }
+
+    [Test]
+    public void ReformattedEarlierDesigner_IsNotAnEdit()
+    {
+        using var project = WriteAllVersions();
+        ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+        var (editor, _) = EditLineInEarlierDesigner(project, line => line.Replace("(", " ( ", StringComparison.Ordinal));
+
+        var reformatted = DesignerSet.Scan(project.Directory);
+
+        Assert.That(() => reformatted.ResolveBlocks(reformatted.Find(editor.MigrationId)!), Throws.Nothing);
+    }
+
+    [Test]
+    public void AcceptHandEdits_KeepsTheEditAndRewritesTheHashes()
+    {
+        using var project = WriteAllVersions();
+        ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+        var (editor, _) = EditLineInEarlierDesigner(project, line => $"{line}.HasComment(\"edited\")");
+
+        var summary = ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { }, acceptHandEdits: true);
+
+        var designers = DesignerSet.Scan(project.Directory);
+        Assert.Multiple(() =>
+        {
+            Assert.That(summary.Updated, Is.EqualTo(VersionedContext.Versions.Count));
+            Assert.That(designers.ResolveBlocks(designers.Find(editor.MigrationId)!).Select(block => block.Text), Has.Some.Contains("HasComment(\"edited\")"));
+            Assert.That(ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: true, _ => { }).AlreadyThin, Is.EqualTo(VersionedContext.Versions.Count));
+        });
+    }
+
+    [Test]
+    public void Rc2TextHashes_AreAcceptedAndRewritten()
+    {
+        using var project = WriteAllVersions();
+        ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+        var designers = DesignerSet.Scan(project.Directory);
+        foreach (var designer in designers.All().ToList())
+        {
+            var text = designer.Text;
+            foreach (var operation in designer.Operations.Where(operation => operation.Edit is not null))
+            {
+                var parent = designers.ResolveChain(designers.Find(designer.ParentMigrationId!)!);
+                var lines = ((EntityBlock<string, string>)parent.Single(block => block.Key == operation.Key).Value).Members;
+                var textHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join("\n\0", lines))), 0, 4);
+                text = text.Replace($"\"{operation.Edit!.ParentHash}\"", $"\"{textHash}\"", StringComparison.Ordinal);
+            }
+
+            File.WriteAllText(designer.Path!, text);
+        }
+
+        var rc2 = DesignerSet.Scan(project.Directory);
+        var resolved = VersionedContext.Versions.Select(version => rc2.ResolveBlocks(rc2.Find(GeneratedDesigners.MigrationId(version))!)).ToList();
+        var update = ThinDesignerConverter.Convert(DesignerSet.Scan(project.Directory), null, dryRun: false, _ => { });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolved, Has.Count.EqualTo(VersionedContext.Versions.Count));
+            Assert.That(update.Updated, Is.EqualTo(VersionedContext.Versions.Count));
+            Assert.That(VersionedContext.Versions.Select(version => File.ReadAllText(project.DesignerPath(version))), Has.Some.Contains("\"2:"));
+        });
+    }
+
+    private static (DesignerDocument Editor, string Key) EditLineInEarlierDesigner(TemporaryProject project, Func<string, string> edit)
+    {
         var designers = DesignerSet.Scan(project.Directory);
         var (editor, key) = designers.All()
             .SelectMany(designer => designer.Operations.Where(operation => operation.Kind == BlockOperationKind.Edit).Select(operation => (designer, operation.Key)))
@@ -145,16 +218,10 @@ public class ThinDesignerConverterTests
         var setter = designers.All()
             .Where(designer => string.CompareOrdinal(designer.MigrationId, editor.MigrationId) < 0)
             .Last(designer => designer.Operations.Any(operation => operation.Key == key && operation.Value is EntityBlock<string, string>));
-        var firstLine = ((EntityBlock<string, string>)setter.Operations.Last(operation => operation.Key == key && operation.Value is not null).Value!).Members[0].Split('\n')[0];
-        var path = setter.Path!;
-        var text = File.ReadAllText(path);
-        File.WriteAllText(path, text.Replace($"static b => {firstLine}", $"static b => {firstLine}.HasComment(\"edited\")", StringComparison.Ordinal));
-
-        var edited = DesignerSet.Scan(project.Directory);
-
-        Assert.That(
-            () => edited.ResolveBlocks(edited.Find(editor.MigrationId)!),
-            Throws.InvalidOperationException.With.Message.Contains(editor.MigrationId).And.Message.Contains("edited by hand"));
+        var line = ((EntityBlock<string, string>)setter.Operations.Last(operation => operation.Key == key && operation.Value is not null).Value!).Members[0].Split('\n')[0];
+        var text = File.ReadAllText(setter.Path!);
+        File.WriteAllText(setter.Path!, text.Replace($"static b => {line}", $"static b => {edit(line)}", StringComparison.Ordinal));
+        return (editor, key);
     }
 
     [Test]

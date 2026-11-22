@@ -20,11 +20,17 @@ internal static class Program
             Description = "Check and report the conversion without writing any files.",
         };
 
+        var acceptHandEditsOption = new Option<bool>("--accept-hand-edits")
+        {
+            Description = "Rebuild every designer as it is now, including lines edited by hand, and rewrite the line hashes.",
+        };
+
         var convert = new Command("convert", "Convert full migration designers into model deltas.")
         {
             projectOption,
             contextOption,
             dryRunOption,
+            acceptHandEditsOption,
         };
         convert.SetAction(parseResult =>
         {
@@ -34,7 +40,8 @@ internal static class Program
                 DesignerSet.Scan(project.FullName),
                 parseResult.GetValue(contextOption),
                 dryRun,
-                Console.WriteLine);
+                Console.WriteLine,
+                acceptHandEdits: parseResult.GetValue(acceptHandEditsOption));
 
             Console.WriteLine(
                 $"{(dryRun ? "Would convert" : "Converted")} {summary.Converted} designers "

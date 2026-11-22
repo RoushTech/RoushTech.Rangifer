@@ -48,12 +48,12 @@ internal sealed class BlockSequence<TOpaque, TMember>
 {
     private readonly List<string> order = [];
     private readonly Dictionary<string, Block<TOpaque, TMember>> values = new(StringComparer.Ordinal);
-    private readonly Func<IReadOnlyList<TMember>, string>? memberHash;
+    private readonly Func<IReadOnlyList<TMember>, string, bool>? parentHashMatches;
 
     // The runtime only has compiled members, so only the design-time tooling can check parent hashes.
-    public BlockSequence(IEnumerable<KeyValuePair<string, Block<TOpaque, TMember>>> blocks, Func<IReadOnlyList<TMember>, string>? memberHash = null)
+    public BlockSequence(IEnumerable<KeyValuePair<string, Block<TOpaque, TMember>>> blocks, Func<IReadOnlyList<TMember>, string, bool>? parentHashMatches = null)
     {
-        this.memberHash = memberHash;
+        this.parentHashMatches = parentHashMatches;
         foreach (var (key, value) in blocks)
         {
             if (!values.TryAdd(key, value))
@@ -117,10 +117,10 @@ internal sealed class BlockSequence<TOpaque, TMember>
                 $"Model block '{key}' is edited by line against a parent with {edit.ParentCount} lines, but the parent has {entity.Members.Count}. An earlier designer was edited by hand.");
         }
 
-        if (memberHash is not null && memberHash(entity.Members) != edit.ParentHash)
+        if (parentHashMatches is not null && !parentHashMatches(entity.Members, edit.ParentHash))
         {
             throw new InvalidOperationException(
-                $"Model block '{key}' is edited by line against a parent with hash {edit.ParentHash}, but the parent's lines hash to {memberHash(entity.Members)}. An earlier designer was edited by hand.");
+                $"Model block '{key}' is edited by line against a parent with hash {edit.ParentHash}, but the parent's lines no longer match it. An earlier designer was edited by hand.");
         }
 
         var members = entity.Members.ToList();

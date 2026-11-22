@@ -6,7 +6,13 @@ internal sealed record ConversionSummary(int Converted, int Updated, int Already
 
 internal static class ThinDesignerConverter
 {
-    public static ConversionSummary Convert(DesignerSet designers, string? contextType, bool dryRun, Action<string> report, bool lineEdits = true)
+    public static ConversionSummary Convert(
+        DesignerSet designers,
+        string? contextType,
+        bool dryRun,
+        Action<string> report,
+        bool lineEdits = true,
+        bool acceptHandEdits = false)
     {
         var converted = 0;
         var updated = 0;
@@ -24,10 +30,12 @@ internal static class ThinDesignerConverter
         {
             var ordered = context.OrderBy(designer => designer.MigrationId, StringComparer.Ordinal).ToList();
 
-            // Designers that store whole entity blocks are rewritten from the base so later ones can edit by line.
-            var update = lineEdits && ordered.Any(StoresWholeEntityBlocks);
+            // Designers in an older format are rewritten from the base so later ones can edit by line.
+            var update = acceptHandEdits || (lineEdits && ordered.Any(NeedsUpdate));
             var models = update
-                ? ordered.Where(designer => designer.Kind == DesignerKind.Thin).ToDictionary(designer => designer.MigrationId, designers.ResolveBlocks)
+                ? ordered
+                    .Where(designer => designer.Kind == DesignerKind.Thin)
+                    .ToDictionary(designer => designer.MigrationId, designer => designers.ResolveBlocks(designer, acceptHandEdits))
                 : null;
 
             DesignerDocument? parent = null;
@@ -75,9 +83,12 @@ internal static class ThinDesignerConverter
         return new ConversionSummary(converted, updated, alreadyThin, withoutModel, before, after);
     }
 
-    private static bool StoresWholeEntityBlocks(DesignerDocument designer) =>
+    private static bool NeedsUpdate(DesignerDocument designer) =>
         designer.Kind == DesignerKind.Thin
-        && designer.Operations.Any(operation =>
-            operation is { Kind: BlockOperationKind.Set, Value: OpaqueBlock<string, string> opaque }
-            && EntityLines.TrySplit(operation.Key, opaque.Value) is not null);
+        && designer.Operations.Any(operation => operation switch
+        {
+            { Kind: BlockOperationKind.Set, Value: OpaqueBlock<string, string> opaque } => EntityLines.TrySplit(operation.Key, opaque.Value) is not null,
+            { Kind: BlockOperationKind.Edit, Edit: { } edit } => !EntityLines.IsCurrentHash(edit.ParentHash),
+            _ => false,
+        });
 }

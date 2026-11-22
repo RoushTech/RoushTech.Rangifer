@@ -12,7 +12,7 @@ public class BlockSequenceTests
     private static Block<string, string> Opaque(string value) => new OpaqueBlock<string, string>(value);
 
     private static BlockSequence<string, string> Entity(params string[] lines) =>
-        new([KeyValuePair.Create("1:E", (Block<string, string>)new EntityBlock<string, string>("E", lines))], members => string.Join(",", members));
+        new([KeyValuePair.Create("1:E", (Block<string, string>)new EntityBlock<string, string>("E", lines))], (members, hash) => string.Join(",", members) == hash);
 
     private static IReadOnlyList<string> Lines(BlockSequence<string, string> sequence) =>
         ((EntityBlock<string, string>)sequence.Blocks.Single().Value).Members;

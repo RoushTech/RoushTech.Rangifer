@@ -73,10 +73,10 @@ internal sealed partial class DesignerSet
 
     public void Replace(DesignerDocument document) => documents[document.MigrationId] = document;
 
-    public IReadOnlyList<ModelBlock> ResolveBlocks(DesignerDocument designer) =>
-        ResolveChain(designer).Select(block => new ModelBlock(block.Key, EntityLines.Text(block.Value))).ToList();
+    public IReadOnlyList<ModelBlock> ResolveBlocks(DesignerDocument designer, bool acceptHandEdits = false) =>
+        ResolveChain(designer, acceptHandEdits).Select(block => new ModelBlock(block.Key, EntityLines.Text(block.Value))).ToList();
 
-    public IReadOnlyList<KeyValuePair<string, TextBlock>> ResolveChain(DesignerDocument designer)
+    public IReadOnlyList<KeyValuePair<string, TextBlock>> ResolveChain(DesignerDocument designer, bool acceptHandEdits = false)
     {
         if (designer.Kind == DesignerKind.Full)
         {
@@ -113,7 +113,9 @@ internal sealed partial class DesignerSet
                 ?? throw new InvalidOperationException($"Migration '{current.MigrationId}' builds on '{parentId}', whose designer was not found.");
         }
 
-        var sequence = new BlockSequence<string, string>(current.Kind == DesignerKind.Full ? Opaque(current.Blocks) : [], EntityLines.Hash);
+        var sequence = new BlockSequence<string, string>(
+            current.Kind == DesignerKind.Full ? Opaque(current.Blocks) : [],
+            acceptHandEdits ? null : EntityLines.HashMatches);
         foreach (var link in chain)
         {
             foreach (var operation in link.Operations)

@@ -69,7 +69,7 @@ internal static class DeltaPlanner
 
     public static BlockSequence<string, string> Replay(IEnumerable<KeyValuePair<string, TextBlock>> parent, IEnumerable<TextOperation> operations)
     {
-        var sequence = new BlockSequence<string, string>(parent, EntityLines.Hash);
+        var sequence = new BlockSequence<string, string>(parent, EntityLines.HashMatches);
         foreach (var operation in operations)
         {
             sequence.Apply(operation);
