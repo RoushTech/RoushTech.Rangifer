@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PackageId>RoushTech.Rangifer.Cli</PackageId>
+    <Description>The rangifer dotnet tool. Converts existing EF Core migration designers into Rangifer model deltas.</Description>
+    <PackageTags>entity-framework-core;efcore;migrations;dotnet-tool</PackageTags>
+    <PackageReadmeFile>cli.md</PackageReadmeFile>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>rangifer</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../RoushTech.Rangifer.EntityFrameworkCore.Design/RoushTech.Rangifer.EntityFrameworkCore.Design.csproj" />
+  </ItemGroup>
+
+</Project>

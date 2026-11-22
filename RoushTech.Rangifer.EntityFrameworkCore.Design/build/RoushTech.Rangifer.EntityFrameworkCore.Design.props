@@ -1,0 +1,13 @@
+<Project>
+
+  <!--
+    EF Core loads DesignTimeServicesReference types from the startup project's output and aborts every dotnet ef
+    command if one is missing, so only executables (where the startup project's own dependencies are present) get it.
+  -->
+  <ItemGroup Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe'">
+    <AssemblyAttribute Include="Microsoft.EntityFrameworkCore.Design.DesignTimeServicesReferenceAttribute">
+      <_Parameter1>RoushTech.Rangifer.EntityFrameworkCore.Design.RangiferDesignTimeServices, RoushTech.Rangifer.EntityFrameworkCore.Design</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

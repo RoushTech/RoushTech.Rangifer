@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="RoushTech.Rangifer.Cli/RoushTech.Rangifer.Cli.csproj" />
+  <Project Path="RoushTech.Rangifer.EntityFrameworkCore.Design/RoushTech.Rangifer.EntityFrameworkCore.Design.csproj" />
+  <Project Path="RoushTech.Rangifer.EntityFrameworkCore/RoushTech.Rangifer.EntityFrameworkCore.csproj" />
+  <Project Path="RoushTech.Rangifer.Tests/RoushTech.Rangifer.Tests.csproj" />
+</Solution>

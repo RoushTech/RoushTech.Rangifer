@@ -1,0 +1,71 @@
+name: Publish to NuGet
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet restore
+
+      - name: Check for an unreleased version
+        id: version
+        run: |
+          version=$(dotnet msbuild RoushTech.Rangifer.EntityFrameworkCore/RoushTech.Rangifer.EntityFrameworkCore.csproj -getProperty:Version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already released."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.version.outputs.release == 'true'
+        run: dotnet build --configuration Release --no-restore
+      - if: steps.version.outputs.release == 'true'
+        run: dotnet test --configuration Release --no-build
+      - if: steps.version.outputs.release == 'true'
+        run: dotnet pack --configuration Release --no-build --output ./artifacts
+
+      - name: NuGet login
+        id: login
+        if: steps.version.outputs.release == 'true'
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to NuGet
+        if: steps.version.outputs.release == 'true'
+        run: |
+          dotnet nuget push "./artifacts/*.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Tag and create GitHub release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" ./artifacts/*.nupkg ./artifacts/*.snupkg \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --generate-notes \
+            $([[ $VERSION == *-* ]] && echo --prerelease)

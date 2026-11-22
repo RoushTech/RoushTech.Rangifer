@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoushTech.Rangifer.EntityFrameworkCore</PackageId>
+    <Description>Runtime half of Rangifer's thin EF Core migration designers: rebuilds each migration's target model from a chain of small model deltas instead of storing a full model copy per migration.</Description>
+    <PackageTags>entity-framework-core;efcore;migrations;designer</PackageTags>
+    <PackageReadmeFile>thin-migration-designers.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RoushTech.Rangifer.EntityFrameworkCore.Design" />
+    <InternalsVisibleTo Include="RoushTech.Rangifer.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageReference Include="NUnit" Version="4.6.1" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.3.1" />
+    <PackageReference Include="NUnit.Analyzers" Version="4.15.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../RoushTech.Rangifer.EntityFrameworkCore/RoushTech.Rangifer.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="../RoushTech.Rangifer.EntityFrameworkCore.Design/RoushTech.Rangifer.EntityFrameworkCore.Design.csproj" />
+  </ItemGroup>
+
+</Project>

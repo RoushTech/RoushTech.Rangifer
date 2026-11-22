@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoushTech.Rangifer.EntityFrameworkCore.Design</PackageId>
+    <Description>Design-time half of Rangifer's thin EF Core migration designers: dotnet ef migrations add writes a Designer.cs holding only the model blocks that changed since the parent migration.</Description>
+    <PackageTags>entity-framework-core;efcore;migrations;designer</PackageTags>
+    <PackageReadmeFile>thin-migration-designers.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11" PrivateAssets="none" IncludeAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../RoushTech.Rangifer.EntityFrameworkCore/RoushTech.Rangifer.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="build/RoushTech.Rangifer.EntityFrameworkCore.Design.props" Pack="true" PackagePath="build/;buildTransitive/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RoushTech.Rangifer.Cli" />
+    <InternalsVisibleTo Include="RoushTech.Rangifer.Tests" />
+  </ItemGroup>
+
+</Project>
