@@ -16,6 +16,11 @@
   <ItemGroup>
     <ProjectReference Include="../RoushTech.Rangifer.EntityFrameworkCore/RoushTech.Rangifer.EntityFrameworkCore.csproj" />
     <ProjectReference Include="../RoushTech.Rangifer.EntityFrameworkCore.Design/RoushTech.Rangifer.EntityFrameworkCore.Design.csproj" />
+    <ProjectReference Include="../RoushTech.Rangifer.Mail/RoushTech.Rangifer.Mail.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Mail/Templates/**/*.liquid" />
   </ItemGroup>
 
 </Project>

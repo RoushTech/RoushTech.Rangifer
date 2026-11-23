@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>RoushTech.Rangifer.Mail</PackageId>
+    <Description>Liquid email rendering that HTML-encodes every value, embedded templates with frontmatter subjects, a MailKit SMTP transport, one-click unsubscribe headers, and Resend webhook signature checks.</Description>
+    <PackageTags>email;liquid;fluid;mailkit;resend</PackageTags>
+    <PackageReadmeFile>mail.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Fluid.Core" Version="2.31.0" />
+    <PackageReference Include="Fluid.ViewEngine" Version="2.31.0" />
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.11" />
+    <PackageReference Include="PreMailer.Net" Version="2.7.3" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
+  </ItemGroup>
+
+</Project>

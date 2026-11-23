@@ -10,7 +10,7 @@
 
   <PropertyGroup Label="Packaging">
     <VersionPrefix>0.1.0</VersionPrefix>
-    <VersionSuffix>rc.3</VersionSuffix>
+    <VersionSuffix>rc.4</VersionSuffix>
     <Authors>William Roush</Authors>
     <Company>RoushTech</Company>
     <Copyright>William Roush 2026</Copyright>
